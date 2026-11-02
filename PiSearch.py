@@ -450,8 +450,26 @@ class PiSearchApp:
             add="+",
         )
         self.search_entry.bind("<KeyPress>", self._capitalize_or_reject)
-        self.search_entry.bind("<<Paste>>", self._paste_query)
-        self.search_entry.bind("<<PasteSelection>>", self._paste_query)
+        for sequence in (
+            "<Control-c>",
+            "<Control-C>",
+            "<Control-v>",
+            "<Control-V>",
+            "<Control-Insert>",
+            "<Shift-Insert>",
+        ):
+            self.search_entry.bind(sequence, lambda _event: "break")
+        self.query_menu = tk.Menu(
+            self.root,
+            tearoff=False,
+            bg=INPUT_BACKGROUND,
+            fg=WHITE,
+            activebackground=ORANGE,
+            activeforeground=BACKGROUND,
+            disabledforeground=MUTED,
+        )
+        self.query_menu.add_command(label="Вставить", command=self._paste_query)
+        self.search_entry.bind("<Button-3>", self._show_query_menu)
         self.search_button = tk.Canvas(
             search_row,
             width=112,
@@ -600,6 +618,15 @@ class PiSearchApp:
             label="Копировать",
             command=self._copy_context,
         )
+        for sequence in (
+            "<Control-c>",
+            "<Control-C>",
+            "<Control-v>",
+            "<Control-V>",
+            "<Control-Insert>",
+            "<Shift-Insert>",
+        ):
+            self.context.bind(sequence, lambda _event: "break")
         self.context.bind("<Button-3>", self._show_context_menu)
         self.context_scrollbar = ttk.Scrollbar(
             context_body,
@@ -735,14 +762,21 @@ class PiSearchApp:
         self.context_menu.post(event.x_root, event.y_root)
         return "break"
 
-    def _copy_context(self) -> None:
+    def _copy_context(self, _event: tk.Event | None = None) -> str:
         try:
-            selected_text = self.context.get(tk.SEL_FIRST, tk.SEL_LAST)
+            text = self.context.get(tk.SEL_FIRST, tk.SEL_LAST)
         except tk.TclError:
-            return
+            return "break"
+        text = text.replace("\r", "").replace("\n", "")
         self.root.clipboard_clear()
-        self.root.clipboard_append(selected_text)
+        self.root.clipboard_append(text)
         self.root.update_idletasks()
+        return "break"
+
+    def _show_query_menu(self, event: tk.Event) -> str:
+        self.search_entry.focus_set()
+        self.query_menu.post(event.x_root, event.y_root)
+        return "break"
 
     def _draw_search_button(self) -> None:
         if not self.search_button.winfo_exists():
@@ -866,21 +900,16 @@ class PiSearchApp:
                 return "break"
         return None
 
-    def _paste_query(self, _event: tk.Event) -> str:
+    def _paste_query(self, _event: tk.Event | None = None) -> str:
         try:
-            pasted = self.root.clipboard_get().upper()
+            clipboard_text = self.root.clipboard_get().upper()
         except tk.TclError:
             return "break"
-        current = self.query.get()
-        try:
-            selection_start = self.search_entry.index(tk.SEL_FIRST)
-            selection_end = self.search_entry.index(tk.SEL_LAST)
-            proposed = current[:selection_start] + pasted + current[selection_end:]
-        except tk.TclError:
-            insertion = self.search_entry.index(tk.INSERT)
-            proposed = current[:insertion] + pasted + current[insertion:]
-        if not self._validate_query(proposed):
-            return "break"
+        pasted = "".join(
+            character
+            for character in clipboard_text
+            if self._is_query_character(character)
+        )
         try:
             self.search_entry.delete(tk.SEL_FIRST, tk.SEL_LAST)
         except tk.TclError:
@@ -1103,8 +1132,10 @@ class PiSearchApp:
 
         total_matches = len(self.active_positions)
         self.match_number.set(str(self.current_match + 1))
-        self.match_total.set(f"из {total_matches} совпадений")
-        self.match_limit_note.set(f"Введите номер от 1 до {total_matches}")
+        self.match_total.set(f"из {total_matches:,} совпадений".replace(",", " "))
+        self.match_limit_note.set(
+            f"Введите номер от 1 до {total_matches:,}".replace(",", " ")
+        )
         if self.active_mode == "digits":
             position_text = (
                 "целой части π"
